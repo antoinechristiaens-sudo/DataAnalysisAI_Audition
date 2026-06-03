@@ -1,0 +1,38 @@
+variable,role,description,type,missing_n,missing_percent
+patient_id,Additional variable,Unique patient identifier,int64,0,0.0
+practice_id,Additional variable,General practice identifier,int64,0,0.0
+severe_hypoglycaemia,Outcome,Binary outcome: severe hypoglycaemia during follow-up,int64,0,0.0
+age,Candidate predictor,Age in years,int64,0,0.0
+sex,Candidate predictor,Sex,object,0,0.0
+"deprivation_score,Candidate predictor,""Socioeconomic deprivation score, 0-100"",float64,13,2.0"
+diabetes_duration,Candidate predictor,Duration of diabetes in years,int64,0,0.0
+hba1c,Candidate predictor,HbA1c in percent,float64,11,1.7
+"bmi,Candidate predictor,""Body mass index, kg/m2"",float64,15,2.3"
+"metformin_use,Candidate predictor,""Current metformin use, 0/1"",int64,0,0.0"
+"sulfonylurea_use,Candidate predictor,""Current sulfonylurea use, 0/1"",int64,0,0.0"
+"glp1ra_use,Candidate predictor,""Current GLP-1 receptor agonist use, 0/1"",int64,0,0.0"
+"sglt2i_use,Candidate predictor,""Current SGLT2 inhibitor use, 0/1"",int64,0,0.0"
+"basal_insulin_use,Candidate predictor,""Current basal insulin use without prandial insulin, 0/1"",int64,0,0.0"
+"basal_prandial_insulin_use,Candidate predictor,""Current basal-prandial insulin regimen, 0/1"",int64,0,0.0"
+"egfr,Candidate predictor,""Estimated glomerular filtration rate, mL/min/1.73m2"",float64,9,1.4"
+"frailty_index,Candidate predictor,""Frailty index, 0-1"",float64,14,2.2"
+"dementia,Candidate predictor,""Dementia diagnosis, 0/1"",int64,0,0.0"
+"depression,Candidate predictor,""Depression diagnosis, 0/1"",int64,0,0.0"
+"falls_history,Candidate predictor,""History of falls in the previous year, 0/1"",int64,0,0.0"
+"previous_hypoglycaemia,Candidate predictor,""Previous hypoglycaemia before baseline, 0/1"",int64,0,0.0"
+polypharmacy,Candidate predictor,Number of regular medications,int64,0,0.0
+"weight_loss,Candidate predictor,""Recent unintentional weight loss, 0/1"",int64,0,0.0"
+hospitalisation_last_year,Candidate predictor,Number of hospitalisations in previous year,int64,0,0.0
+smoking_status,Additional variable,Smoking status,object,4,0.6
+alcohol_use,Additional variable,Alcohol use category,object,0,0.0
+"systolic_bp,Additional variable,""Systolic blood pressure, mmHg"",int64,0,0.0"
+"diastolic_bp,Additional variable,""Diastolic blood pressure, mmHg"",int64,0,0.0"
+"total_cholesterol,Additional variable,""Total cholesterol, mg/dL"",float64,10,1.5"
+"ldl,Additional variable,""LDL cholesterol, mg/dL"",float64,18,2.8"
+"cardiovascular_disease,Additional variable,""Cardiovascular disease history, 0/1"",int64,0,0.0"
+"heart_failure,Additional variable,""Heart failure diagnosis, 0/1"",int64,0,0.0"
+"stroke_history,Additional variable,""Previous stroke/TIA, 0/1"",int64,0,0.0"
+"cancer_history,Additional variable,""Cancer history, 0/1"",int64,0,0.0"
+"living_alone,Additional variable,""Living alone, 0/1"",int64,0,0.0"
+physical_activity,Additional variable,Physical activity level,object,18,2.8
+"cgm_use,Additional variable,""Continuous glucose monitoring use, 0/1"",int64,0,0.0"
