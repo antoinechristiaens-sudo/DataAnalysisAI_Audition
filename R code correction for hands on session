@@ -1,0 +1,586 @@
+############################################################
+# ISBMM104 Data Analysis – UNamur
+# Hands-on session – Module 8: Prediction Modelling 1
+# Corrective R script
+#
+# Objective:
+# Develop, validate, and interpret a prediction model estimating
+# the risk of severe hypoglycaemia within one year.
+############################################################
+
+############################################################
+# 0. Packages
+############################################################
+
+# Install packages if needed:
+# install.packages(c("tidyverse", "glmnet", "pROC", "broom"))
+
+library(tidyverse)
+library(glmnet)
+library(pROC)
+library(broom)
+
+set.seed(1234)
+
+############################################################
+# 1. Import the dataset and data dictionary
+############################################################
+
+data <- read_csv("ISBMM104_PredMod.csv")
+ddict <- read_csv("ISBMM104_PredMod_ddict.csv")
+
+# Outcome
+outcome <- "severe_hypoglycaemia"
+
+# Candidate predictors for this hands-on session
+candidate_predictors <- c(
+  "age",
+  "sex",
+  "deprivation_score",
+  "diabetes_duration",
+  "hba1c",
+  "bmi",
+  "sulfonylurea_use",
+  "glp1ra_use",
+  "sglt2i_use",
+  "basal_insulin_use",
+  "basal_prandial_insulin_use",
+  "egfr",
+  "frailty_index",
+  "dementia",
+  "falls_history",
+  "previous_hypoglycaemia",
+  "polypharmacy",
+  "weight_loss"
+)
+
+# Check that all variables exist in the dataset
+setdiff(c(outcome, candidate_predictors), names(data))
+
+# Convert categorical variables when appropriate
+data <- data %>%
+  mutate(
+    severe_hypoglycaemia = as.numeric(severe_hypoglycaemia),
+    sex = factor(sex)
+  )
+
+############################################################
+# PART 1 – Explore the dataset
+############################################################
+
+############################################################
+# Task 1 – Number of patients, events, and outcome prevalence
+############################################################
+
+n_patients <- nrow(data)
+
+n_events <- sum(data[[outcome]] == 1, na.rm = TRUE)
+
+outcome_prevalence <- mean(data[[outcome]] == 1, na.rm = TRUE) * 100
+
+task1_results <- tibble(
+  n_patients = n_patients,
+  n_events = n_events,
+  outcome_prevalence_percent = round(outcome_prevalence, 1)
+)
+
+task1_results
+
+############################################################
+# Task 2 – Explore candidate predictors
+############################################################
+
+# 2A. Variable type and missing values
+predictor_summary <- tibble(
+  variable = candidate_predictors,
+  variable_type = map_chr(data[candidate_predictors], ~ class(.x)[1]),
+  missing_n = map_int(data[candidate_predictors], ~ sum(is.na(.x))),
+  missing_percent = round(
+    map_dbl(data[candidate_predictors], ~ mean(is.na(.x)) * 100),
+    1
+  )
+)
+
+predictor_summary
+
+# 2B. Descriptive statistics for continuous predictors
+continuous_predictors <- data %>%
+  select(all_of(candidate_predictors)) %>%
+  select(where(is.numeric)) %>%
+  names()
+
+continuous_summary <- data %>%
+  summarise(
+    across(
+      all_of(continuous_predictors),
+      list(
+        n_non_missing = ~ sum(!is.na(.x)),
+        mean = ~ mean(.x, na.rm = TRUE),
+        sd = ~ sd(.x, na.rm = TRUE),
+        median = ~ median(.x, na.rm = TRUE),
+        q1 = ~ quantile(.x, 0.25, na.rm = TRUE),
+        q3 = ~ quantile(.x, 0.75, na.rm = TRUE),
+        min = ~ min(.x, na.rm = TRUE),
+        max = ~ max(.x, na.rm = TRUE)
+      ),
+      .names = "{.col}_{.fn}"
+    )
+  ) %>%
+  pivot_longer(
+    everything(),
+    names_to = c("variable", ".value"),
+    names_pattern = "(.+)_(n_non_missing|mean|sd|median|q1|q3|min|max)"
+  )
+
+continuous_summary
+
+# 2C. Descriptive statistics for categorical predictors
+categorical_predictors <- data %>%
+  select(all_of(candidate_predictors)) %>%
+  select(where(~ is.factor(.x) || is.character(.x))) %>%
+  names()
+
+categorical_summary <- data %>%
+  select(all_of(categorical_predictors)) %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "variable",
+    values_to = "category"
+  ) %>%
+  group_by(variable, category) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(variable) %>%
+  mutate(percent = round(n / sum(n) * 100, 1)) %>%
+  ungroup()
+
+categorical_summary
+
+############################################################
+# PART 2 – Complete-case dataset
+############################################################
+
+############################################################
+# Task 3 – Create a complete-case dataset
+############################################################
+
+model_variables <- c(outcome, candidate_predictors)
+
+data_cc <- data %>%
+  select(all_of(model_variables)) %>%
+  drop_na()
+
+n_excluded <- nrow(data) - nrow(data_cc)
+n_remaining <- nrow(data_cc)
+
+task3_results <- tibble(
+  n_initial = nrow(data),
+  n_excluded = n_excluded,
+  n_remaining = n_remaining
+)
+
+task3_results
+
+############################################################
+# Task 4 – Develop a penalised logistic regression model
+############################################################
+
+# glmnet requires:
+# X = predictor matrix
+# Y = outcome vector
+
+X_cc <- model.matrix(
+  severe_hypoglycaemia ~ .,
+  data = data_cc
+)[, -1]
+
+Y_cc <- data_cc$severe_hypoglycaemia
+
+# Cross-validated LASSO logistic regression
+fit_lasso_cv <- cv.glmnet(
+  x = X_cc,
+  y = Y_cc,
+  family = "binomial",
+  alpha = 1,
+  nfolds = 10,
+  standardize = TRUE
+)
+
+# Plot cross-validation error according to lambda
+plot(fit_lasso_cv)
+
+# Coefficient path plot
+fit_lasso_path <- glmnet(
+  x = X_cc,
+  y = Y_cc,
+  family = "binomial",
+  alpha = 1,
+  standardize = TRUE
+)
+
+plot(fit_lasso_path, xvar = "lambda", label = TRUE)
+
+# Useful lambda values
+lambda_min <- fit_lasso_cv$lambda.min
+lambda_1se <- fit_lasso_cv$lambda.1se
+
+lambda_values <- c(
+  weak_penalisation = lambda_min / 5,
+  lambda_min = lambda_min,
+  lambda_1se = lambda_1se,
+  very_strong_penalisation = lambda_1se * 3
+)
+
+lambda_values
+
+############################################################
+# Task 5 – Compare several levels of penalisation
+############################################################
+
+# Function to extract coefficients for one lambda
+extract_lasso_coefs <- function(fit, lambda_value, lambda_name) {
+  coef_matrix <- coef(fit, s = lambda_value)
+
+  tibble(
+    predictor = rownames(coef_matrix),
+    coefficient = as.numeric(coef_matrix)
+  ) %>%
+    mutate(
+      lambda = lambda_name,
+      selected = coefficient != 0
+    )
+}
+
+coef_long <- map2_dfr(
+  lambda_values,
+  names(lambda_values),
+  ~ extract_lasso_coefs(fit_lasso_cv, .x, .y)
+)
+
+# Table with all coefficients
+coef_comparison_table <- coef_long %>%
+  select(predictor, lambda, coefficient) %>%
+  pivot_wider(
+    names_from = lambda,
+    values_from = coefficient
+  )
+
+coef_comparison_table
+
+# Number of selected predictors for each lambda
+# The intercept is not counted as a predictor.
+selected_predictors_summary <- coef_long %>%
+  filter(predictor != "(Intercept)") %>%
+  group_by(lambda) %>%
+  summarise(
+    n_selected_predictors = sum(coefficient != 0),
+    selected_predictors = paste(predictor[coefficient != 0], collapse = ", "),
+    .groups = "drop"
+  )
+
+selected_predictors_summary
+
+############################################################
+# Task 6 – Report the final model
+############################################################
+
+# For clinical implementation, lambda.1se is often attractive because it
+# usually gives a simpler model with similar cross-validated performance.
+# You can change this to lambda_min if you want a less penalised model.
+
+final_lambda_name <- "lambda_1se"
+final_lambda <- lambda_1se
+
+final_coef_table <- extract_lasso_coefs(
+  fit = fit_lasso_cv,
+  lambda_value = final_lambda,
+  lambda_name = final_lambda_name
+)
+
+final_selected_predictors <- final_coef_table %>%
+  filter(predictor != "(Intercept)", coefficient != 0) %>%
+  arrange(desc(abs(coefficient)))
+
+final_excluded_predictors <- final_coef_table %>%
+  filter(predictor != "(Intercept)", coefficient == 0)
+
+final_selected_predictors
+final_excluded_predictors
+
+# Final model equation:
+# logit(P severe hypoglycaemia) = intercept + beta1*X1 + beta2*X2 + ...
+
+############################################################
+# PART 3 – Apparent performance
+############################################################
+
+############################################################
+# Task 7 – Discrimination: AUROC
+############################################################
+
+# Predicted probabilities in the complete-case dataset
+data_cc <- data_cc %>%
+  mutate(
+    predicted_risk = as.numeric(
+      predict(
+        fit_lasso_cv,
+        newx = X_cc,
+        s = final_lambda,
+        type = "response"
+      )
+    )
+  )
+
+roc_apparent <- roc(
+  response = data_cc$severe_hypoglycaemia,
+  predictor = data_cc$predicted_risk,
+  quiet = TRUE
+)
+
+auc_apparent <- as.numeric(auc(roc_apparent))
+
+auc_apparent
+
+# Plot ROC curve
+plot(roc_apparent)
+
+# Suggested interpretation:
+auc_interpretation <- case_when(
+  auc_apparent < 0.50 ~ "Worse than chance",
+  auc_apparent < 0.70 ~ "Poor / close to random discrimination",
+  auc_apparent < 0.80 ~ "Acceptable discrimination",
+  auc_apparent < 0.90 ~ "Good discrimination",
+  auc_apparent < 1.00 ~ "Excellent discrimination",
+  auc_apparent == 1.00 ~ "Perfect discrimination"
+)
+
+auc_interpretation
+
+############################################################
+# Task 8 – Calibration plot
+############################################################
+
+# Create groups according to predicted risk.
+# Here we use 10 groups (deciles) of predicted risk.
+calibration_table <- data_cc %>%
+  mutate(risk_group = ntile(predicted_risk, 10)) %>%
+  group_by(risk_group) %>%
+  summarise(
+    n = n(),
+    mean_predicted_risk = mean(predicted_risk),
+    observed_risk = mean(severe_hypoglycaemia),
+    .groups = "drop"
+  )
+
+calibration_table
+
+# Calibration plot
+ggplot(
+  calibration_table,
+  aes(x = mean_predicted_risk, y = observed_risk)
+) +
+  geom_point(size = 2) +
+  geom_line() +
+  geom_abline(
+    intercept = 0,
+    slope = 1,
+    linetype = "dashed"
+  ) +
+  labs(
+    title = "Calibration plot",
+    x = "Mean predicted risk",
+    y = "Observed risk"
+  ) +
+  coord_equal(
+    xlim = c(0, max(calibration_table$mean_predicted_risk,
+                   calibration_table$observed_risk)),
+    ylim = c(0, max(calibration_table$mean_predicted_risk,
+                   calibration_table$observed_risk))
+  ) +
+  theme_minimal()
+
+# Optional: calibration-in-the-large and calibration slope
+# These are more advanced but useful for the correction.
+
+calibration_intercept_model <- glm(
+  severe_hypoglycaemia ~ 1,
+  family = binomial(),
+  offset = qlogis(predicted_risk),
+  data = data_cc
+)
+
+calibration_slope_model <- glm(
+  severe_hypoglycaemia ~ qlogis(predicted_risk),
+  family = binomial(),
+  data = data_cc
+)
+
+calibration_intercept <- coef(calibration_intercept_model)[1]
+calibration_slope <- coef(calibration_slope_model)[2]
+
+calibration_intercept
+calibration_slope
+
+############################################################
+# PART 4 – Internal validation
+############################################################
+
+############################################################
+# Task 9 – Bootstrap validation
+############################################################
+
+# The objective is to estimate optimism:
+# optimism = AUROC in bootstrap sample - AUROC in original sample
+# using the model fitted in the bootstrap sample.
+
+B <- 500
+
+bootstrap_results <- tibble(
+  bootstrap = integer(),
+  auc_bootstrap = double(),
+  auc_original = double(),
+  optimism = double()
+)
+
+n_cc <- nrow(data_cc)
+
+for (b in 1:B) {
+
+  # 1. Draw a bootstrap sample
+  boot_index <- sample(seq_len(n_cc), size = n_cc, replace = TRUE)
+
+  data_boot <- data_cc[boot_index, ]
+
+  # Check that the bootstrap sample contains both outcome classes
+  if (length(unique(data_boot$severe_hypoglycaemia)) < 2) {
+    next
+  }
+
+  # 2. Refit the model in the bootstrap sample
+  X_boot <- model.matrix(
+    severe_hypoglycaemia ~ . - predicted_risk,
+    data = data_boot
+  )[, -1]
+
+  Y_boot <- data_boot$severe_hypoglycaemia
+
+  fit_boot <- try(
+    cv.glmnet(
+      x = X_boot,
+      y = Y_boot,
+      family = "binomial",
+      alpha = 1,
+      nfolds = 5,
+      standardize = TRUE
+    ),
+    silent = TRUE
+  )
+
+  if (inherits(fit_boot, "try-error")) {
+    next
+  }
+
+  # 3. Performance in the bootstrap sample
+  pred_boot <- as.numeric(
+    predict(
+      fit_boot,
+      newx = X_boot,
+      s = "lambda.1se",
+      type = "response"
+    )
+  )
+
+  auc_boot <- as.numeric(
+    auc(
+      roc(
+        response = Y_boot,
+        predictor = pred_boot,
+        quiet = TRUE
+      )
+    )
+  )
+
+  # 4. Performance of the bootstrap model in the original sample
+  X_original <- X_cc
+  Y_original <- Y_cc
+
+  pred_original <- as.numeric(
+    predict(
+      fit_boot,
+      newx = X_original,
+      s = "lambda.1se",
+      type = "response"
+    )
+  )
+
+  auc_original <- as.numeric(
+    auc(
+      roc(
+        response = Y_original,
+        predictor = pred_original,
+        quiet = TRUE
+      )
+    )
+  )
+
+  # 5. Optimism
+  optimism_b <- auc_boot - auc_original
+
+  bootstrap_results <- bind_rows(
+    bootstrap_results,
+    tibble(
+      bootstrap = b,
+      auc_bootstrap = auc_boot,
+      auc_original = auc_original,
+      optimism = optimism_b
+    )
+  )
+
+  if (b %% 50 == 0) {
+    message("Bootstrap sample ", b, " / ", B, " completed")
+  }
+}
+
+bootstrap_results
+
+mean_optimism <- mean(bootstrap_results$optimism, na.rm = TRUE)
+
+optimism_corrected_auc <- auc_apparent - mean_optimism
+
+task9_results <- tibble(
+  apparent_auc = auc_apparent,
+  mean_optimism = mean_optimism,
+  optimism_corrected_auc = optimism_corrected_auc,
+  n_successful_bootstrap_samples = nrow(bootstrap_results)
+)
+
+task9_results
+
+############################################################
+# Task 10 – Compare apparent and bootstrap-corrected AUROC
+############################################################
+
+performance_comparison <- tibble(
+  performance_measure = c(
+    "Apparent AUROC",
+    "Mean optimism",
+    "Optimism-corrected AUROC"
+  ),
+  value = c(
+    auc_apparent,
+    mean_optimism,
+    optimism_corrected_auc
+  )
+)
+
+performance_comparison
+
+# Simple interpretation
+if (mean_optimism < 0.02) {
+  optimism_message <- "Optimism is small. There is limited evidence of overfitting based on AUROC."
+} else if (mean_optimism < 0.05) {
+  optimism_message <- "Optimism is moderate. Some overfitting may be present."
+} else {
+  optimism_message <- "Optimism is substantial. The apparent AUROC likely overestimates model performance."
+}
+
+optimism_message
